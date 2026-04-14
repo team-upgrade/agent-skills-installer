@@ -119,7 +119,8 @@ resolve_tokens() {
     if confirm "기존 토큰을 그대로 사용할까요?"; then
       GH_TOKEN="$existing_gh"
       UPGRADE_API_TOKEN="$existing_api"
-      return
+      verify_gh_token
+      return 0
     fi
   fi
 
@@ -129,6 +130,7 @@ resolve_tokens() {
   if [[ -z "${GH_TOKEN:-}" ]]; then
     fail "GH_TOKEN이 비어있습니다."
   fi
+  verify_gh_token
 
   echo
   info "Upgrade API 토큰을 입력하세요"
@@ -184,26 +186,40 @@ multi_select() {
   fi
 
   local cursor=0
+
+  # 터미널 기능 (tput 우선, fallback으로 raw ANSI)
+  local TP_CUU1 TP_EL TP_CIVIS TP_CNORM
+  TP_CUU1=$(tput cuu1 2>/dev/null || printf '\033[A')
+  TP_EL=$(tput el 2>/dev/null || printf '\033[K')
+  TP_CIVIS=$(tput civis 2>/dev/null || printf '\033[?25l')
+  TP_CNORM=$(tput cnorm 2>/dev/null || printf '\033[?25h')
+
+  # 이전 프레임 지우는 시퀀스를 미리 조립 (buffering 문제 회피)
+  local CLEAR_PREV=""
+  for ((i=0; i<count; i++)); do
+    CLEAR_PREV="${CLEAR_PREV}${TP_CUU1}"$'\r'"${TP_EL}"
+  done
+
   local old_stty=""
   old_stty=$(stty -g < /dev/tty 2>/dev/null || true)
 
   _restore_tty() {
     [[ -n "$old_stty" ]] && stty "$old_stty" < /dev/tty 2>/dev/null || true
-    printf '\033[?25h' > /dev/tty 2>/dev/null || true
+    printf '%s' "$TP_CNORM" > /dev/tty 2>/dev/null || true
   }
   trap '_restore_tty; exit 130' INT TERM
 
-  # 라인-편집 끄기, 에코 끄기. -isig는 유지해 Ctrl+C가 SIGINT를 보내도록 함.
   stty -echo -icanon < /dev/tty 2>/dev/null || true
-  printf '\033[?25l' > /dev/tty 2>/dev/null || true
+  printf '%s' "$TP_CIVIS" > /dev/tty 2>/dev/null || true
 
   local first=1
   while true; do
+    # 매 프레임 출력물을 하나의 문자열로 쌓은 뒤 단일 write
+    local frame=""
     if (( first )); then
       first=0
     else
-      # 이전에 그린 N개의 아이템 라인을 걷어내고 재렌더
-      printf '\033[%dA\r\033[0J' "$count" > /dev/tty
+      frame+="$CLEAR_PREV"
     fi
 
     for ((i=0; i<count; i++)); do
@@ -212,12 +228,13 @@ multi_select() {
       local arrow="  "
       (( i == cursor )) && arrow="> "
       if (( i == cursor )); then
-        # 커서 위치는 하이라이트 (cyan)
-        printf '\033[36m%s[%s] %s\033[0m\n' "$arrow" "$mark" "${labels[i]}" > /dev/tty
+        frame+=$'\033[36m'"${arrow}[${mark}] ${labels[i]}"$'\033[0m\n'
       else
-        printf '%s[%s] %s\n' "$arrow" "$mark" "${labels[i]}" > /dev/tty
+        frame+="${arrow}[${mark}] ${labels[i]}"$'\n'
       fi
     done
+
+    printf '%s' "$frame" > /dev/tty
 
     # 키 입력 (raw)
     local k1=""
@@ -233,9 +250,9 @@ multi_select() {
         selected[cursor]=$((1 - selected[cursor]))
         ;;
       $'\x1b')
-        # ESC — 화살표 시퀀스 (ESC [ A/B/C/D) 추가 2바이트 읽기
+        # ESC — 화살표 시퀀스. 한 번에 2바이트 더 읽기 (타임아웃 관대하게)
         local rest=""
-        IFS= read -rsn2 -t 0.01 rest < /dev/tty || rest=""
+        IFS= read -rsn2 -t 0.2 rest < /dev/tty || rest=""
         case "$rest" in
           '[A') (( cursor > 0 )) && cursor=$((cursor - 1)) ;;
           '[B') (( cursor < count - 1 )) && cursor=$((cursor + 1)) ;;
@@ -449,7 +466,6 @@ main() {
   rc_file=$(detect_rc_file)
 
   resolve_tokens "$rc_file"
-  verify_gh_token
   select_agent_envs "$rc_file"
   install_skills "${requested_skills[@]:-}"
   persist_exports "$rc_file"
