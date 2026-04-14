@@ -107,21 +107,45 @@ read_existing_export() {
   printf '%s\n' "$line" | sed -E "s/^export ${var_name}=\"(.*)\"\$/\1/"
 }
 
+check_gh_token() {
+  # HTTP 코드만 stdout. 실패해도 에러 내지 않음.
+  curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: token $GH_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$ORG/$REPO" 2>/dev/null || echo "0"
+}
+
+verify_gh_token() {
+  info "GitHub 토큰 검증 중..."
+  local http_code
+  http_code=$(check_gh_token)
+  case "$http_code" in
+    200) info "GitHub 토큰 OK" ;;
+    401) fail "GH_TOKEN 인증 실패 (401). 토큰을 다시 확인하세요." ;;
+    403) fail "권한 부족 (403). PAT에 contents:read 권한이 있는지 확인하세요." ;;
+    404) fail "$ORG/$REPO에 접근할 수 없습니다. PAT scope를 확인하세요." ;;
+    *)   fail "GitHub API 응답 이상 (HTTP $http_code)" ;;
+  esac
+}
+
 resolve_tokens() {
   local rc_file="$1"
   local existing_gh existing_api
   existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
   existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
 
+  # 저장된 토큰이 둘 다 있으면 묻지 않고 GH 토큰을 silent 검증 후 그대로 사용.
   if [[ -n "$existing_gh" && -n "$existing_api" ]]; then
-    echo
-    info "기존에 저장된 토큰을 찾았습니다 ($rc_file)."
-    if confirm "기존 토큰을 그대로 사용할까요?"; then
-      GH_TOKEN="$existing_gh"
-      UPGRADE_API_TOKEN="$existing_api"
-      verify_gh_token
+    GH_TOKEN="$existing_gh"
+    UPGRADE_API_TOKEN="$existing_api"
+    info "저장된 토큰 검증 중..."
+    local http_code
+    http_code=$(check_gh_token)
+    if [[ "$http_code" == "200" ]]; then
+      info "저장된 토큰 사용 (재입력 생략)"
       return 0
     fi
+    warn "저장된 GH 토큰이 유효하지 않습니다 (HTTP $http_code). 재입력하세요."
   fi
 
   echo
@@ -134,6 +158,13 @@ resolve_tokens() {
 
   echo
   info "Upgrade API 토큰을 입력하세요"
+  # API 토큰만 이미 있으면 재사용
+  if [[ -n "$existing_api" ]]; then
+    if confirm "저장된 Upgrade API 토큰을 재사용할까요?"; then
+      UPGRADE_API_TOKEN="$existing_api"
+      return 0
+    fi
+  fi
   read_input "UPGRADE_API_TOKEN: " UPGRADE_API_TOKEN 1
   if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
     fail "UPGRADE_API_TOKEN이 비어있습니다."
@@ -141,27 +172,11 @@ resolve_tokens() {
   return 0
 }
 
-verify_gh_token() {
-  info "GitHub 토큰 검증 중..."
-  local http_code
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-    -H "Authorization: token $GH_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/$ORG/$REPO") || true
-
-  case "$http_code" in
-    200) info "GitHub 토큰 OK" ;;
-    401) fail "GH_TOKEN 인증 실패 (401). 토큰을 다시 확인하세요." ;;
-    403) fail "권한 부족 (403). PAT에 contents:read 권한이 있는지 확인하세요." ;;
-    404) fail "$ORG/$REPO에 접근할 수 없습니다. PAT scope를 확인하세요." ;;
-    *)   fail "GitHub API 응답 이상 (HTTP $http_code)" ;;
-  esac
-}
-
 # --- 체크박스 멀티셀렉트 TUI ---------------------------------------------
-# 화살표(↑/↓): 커서 이동, Space: 토글, Enter: 완료
-# preset_csv: pre-check할 인덱스들 (0-based, 쉼표 구분). 빈 문자열이면 0번만 기본.
-# 결과: 선택된 인덱스를 한 줄에 하나씩 stdout 출력.
+# 구현 레퍼런스: https://www.bughunter2k.de/blog/cursor-controlled-selectmenu-in-bash
+# (blurayne의 ui_widget_select 패턴)
+#
+# 화살표(↑/↓)/j/k: 커서 이동, Space: 토글, Enter: 완료
 multi_select() {
   local preset="$1"; shift
   local labels=("$@")
@@ -187,39 +202,41 @@ multi_select() {
 
   local cursor=0
 
-  # 터미널 기능 (tput 우선, fallback으로 raw ANSI)
-  local TP_CUU1 TP_EL TP_CIVIS TP_CNORM
-  TP_CUU1=$(tput cuu1 2>/dev/null || printf '\033[A')
-  TP_EL=$(tput el 2>/dev/null || printf '\033[K')
-  TP_CIVIS=$(tput civis 2>/dev/null || printf '\033[?25l')
-  TP_CNORM=$(tput cnorm 2>/dev/null || printf '\033[?25h')
+  # ANSI-C 리터럴. \e[1A=up1, \e[2K=전체라인클리어, \r=col0, \e[?25l/h=커서숨김/표시
+  local ESC_UP=$'\033[1A'
+  local ESC_CLRLINE=$'\033[2K\r'
+  local ESC_HIDE=$'\033[?25l'
+  local ESC_SHOW=$'\033[?25h'
+  local ESC_CYAN=$'\033[36m'
+  local ESC_RESET=$'\033[0m'
 
-  # 이전 프레임 지우는 시퀀스를 미리 조립 (buffering 문제 회피)
-  local CLEAR_PREV=""
-  for ((i=0; i<count; i++)); do
-    CLEAR_PREV="${CLEAR_PREV}${TP_CUU1}"$'\r'"${TP_EL}"
-  done
+  # tty를 fd 3으로 duplex 오픈 — 매 읽기/쓰기에서 open 반복하지 않음
+  exec 3<>/dev/tty
 
   local old_stty=""
-  old_stty=$(stty -g < /dev/tty 2>/dev/null || true)
+  old_stty=$(stty -g <&3 2>/dev/null || true)
 
   _restore_tty() {
-    [[ -n "$old_stty" ]] && stty "$old_stty" < /dev/tty 2>/dev/null || true
-    printf '%s' "$TP_CNORM" > /dev/tty 2>/dev/null || true
+    [[ -n "$old_stty" ]] && stty "$old_stty" <&3 2>/dev/null || true
+    printf '%s' "$ESC_SHOW" >&3 2>/dev/null || true
+    exec 3<&- 2>/dev/null || true
   }
   trap '_restore_tty; exit 130' INT TERM
 
-  stty -echo -icanon < /dev/tty 2>/dev/null || true
-  printf '%s' "$TP_CIVIS" > /dev/tty 2>/dev/null || true
+  stty -echo -icanon <&3 2>/dev/null || true
+  printf '%s' "$ESC_HIDE" >&3 2>/dev/null || true
 
   local first=1
   while true; do
-    # 매 프레임 출력물을 하나의 문자열로 쌓은 뒤 단일 write
+    # 전체 프레임(클리어 + 아이템)을 하나의 문자열로 조립 → 단일 write
     local frame=""
     if (( first )); then
       first=0
     else
-      frame+="$CLEAR_PREV"
+      # N줄: 각 줄마다 "위로 1줄" + "그 줄 전체 클리어"
+      for ((i=0; i<count; i++)); do
+        frame+="${ESC_UP}${ESC_CLRLINE}"
+      done
     fi
 
     for ((i=0; i<count; i++)); do
@@ -228,53 +245,42 @@ multi_select() {
       local arrow="  "
       (( i == cursor )) && arrow="> "
       if (( i == cursor )); then
-        frame+=$'\033[36m'"${arrow}[${mark}] ${labels[i]}"$'\033[0m\n'
+        frame+="${ESC_CYAN}${arrow}[${mark}] ${labels[i]}${ESC_RESET}"$'\n'
       else
         frame+="${arrow}[${mark}] ${labels[i]}"$'\n'
       fi
     done
 
-    printf '%s' "$frame" > /dev/tty
+    printf '%s' "$frame" >&3
 
-    # 키 입력 (raw)
     local k1=""
-    IFS= read -rsn1 k1 < /dev/tty || break
+    IFS= read -rsn1 k1 <&3 || break
 
     case "$k1" in
       $'\n'|$'\r'|"")
-        # Enter — 완료
         break
         ;;
       ' ')
-        # Space — 토글
         selected[cursor]=$((1 - selected[cursor]))
         ;;
-      $'\x1b')
-        # ESC — 화살표 시퀀스. 한 번에 2바이트 더 읽기 (타임아웃 관대하게)
+      $'\033')
         local rest=""
-        IFS= read -rsn2 -t 0.2 rest < /dev/tty || rest=""
+        IFS= read -rsn2 -t 0.2 rest <&3 || rest=""
         case "$rest" in
           '[A') (( cursor > 0 )) && cursor=$((cursor - 1)) ;;
           '[B') (( cursor < count - 1 )) && cursor=$((cursor + 1)) ;;
           *) : ;;
         esac
         ;;
-      k|K)
-        (( cursor > 0 )) && cursor=$((cursor - 1))
-        ;;
-      j|J)
-        (( cursor < count - 1 )) && cursor=$((cursor + 1))
-        ;;
+      k|K) (( cursor > 0 )) && cursor=$((cursor - 1)) ;;
+      j|J) (( cursor < count - 1 )) && cursor=$((cursor + 1)) ;;
       [0-9])
-        # 숫자 키 토글 (편의용)
         local idx=$((k1 - 1))
         if (( idx >= 0 && idx < count )); then
           selected[idx]=$((1 - selected[idx]))
         fi
         ;;
-      *)
-        : # 다른 키는 무시
-        ;;
+      *) : ;;
     esac
   done
 
