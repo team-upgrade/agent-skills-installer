@@ -15,6 +15,9 @@ set -euo pipefail
 ORG="team-upgrade"
 REPO="agent-skills"
 
+# 토큰이 새로 입력되어 rc 파일에 저장이 필요한지 추적 (재사용 시 0)
+TOKENS_CHANGED=1
+
 info()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
 warn()  { printf "\033[33m!!!\033[0m %s\n" "$*"; }
 fail()  { printf "\033[31mERR\033[0m %s\n" "$*" >&2; exit 1; }
@@ -79,10 +82,10 @@ resolve_tokens() {
   if [[ -n "$existing_gh" && -n "$existing_api" ]]; then
     GH_TOKEN="$existing_gh"
     UPGRADE_API_TOKEN="$existing_api"
-    info "저장된 토큰 검증 중..."
     http_code=$(check_gh_token)
     if [[ "$http_code" == "200" ]]; then
-      info "저장된 토큰 사용 (재입력 생략)"
+      info "이미 등록된 토큰이 있습니다. (재입력 생략)"
+      TOKENS_CHANGED=0
       return 0
     fi
     warn "저장된 GH 토큰이 유효하지 않습니다 (HTTP $http_code). 재입력하세요."
@@ -179,7 +182,9 @@ main() {
   rc_file=$(detect_rc_file)
 
   resolve_tokens "$rc_file"
-  persist_exports "$rc_file"
+  if (( TOKENS_CHANGED )); then
+    persist_exports "$rc_file"
+  fi
 
   # 인자 분해: 위치 인자(스킬 이름) → -s 플래그, 나머지(-...)는 passthrough
   local -a skill_args=() passthrough=()
