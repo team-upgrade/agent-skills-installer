@@ -34,6 +34,16 @@ read_input() {
   fi
 }
 
+confirm() {
+  local prompt="$1"
+  local ans=""
+  read_input "$prompt [Y/n]: " ans 0
+  case "${ans:-}" in
+    ""|y|Y|yes|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 detect_rc_file() {
   case "${SHELL:-}" in
     */zsh)  echo "$HOME/.zshrc" ;;
@@ -53,16 +63,40 @@ check_dependencies() {
   command -v tar  >/dev/null 2>&1 || fail "tar가 필요합니다."
 }
 
-prompt_tokens() {
+# rc 파일에서 export 라인 값만 추출
+read_existing_export() {
+  local rc_file="$1"
+  local var_name="$2"
+  [[ -f "$rc_file" ]] || { echo ""; return; }
+  # 마지막 매칭 라인에서 따옴표 안의 값만
+  grep "^export ${var_name}=" "$rc_file" 2>/dev/null \
+    | tail -n1 \
+    | sed -E "s/^export ${var_name}=\"(.*)\"\$/\1/"
+}
+
+resolve_tokens() {
+  local rc_file="$1"
+  local existing_gh existing_api
+  existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
+  existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
+
+  if [[ -n "$existing_gh" && -n "$existing_api" ]]; then
+    echo
+    info "기존에 저장된 토큰을 찾았습니다 ($rc_file)."
+    if confirm "기존 토큰을 그대로 사용할까요?"; then
+      GH_TOKEN="$existing_gh"
+      UPGRADE_API_TOKEN="$existing_api"
+      return
+    fi
+  fi
+
   echo
   info "GitHub Personal Access Token을 입력하세요"
-  echo "   (1Password 공유 vault: 'agent-skills GH PAT')"
   read_input "GH_TOKEN: " GH_TOKEN 1
   [[ -z "${GH_TOKEN:-}" ]] && fail "GH_TOKEN이 비어있습니다."
 
   echo
   info "Upgrade API 토큰을 입력하세요"
-  echo "   (1Password 공유 vault: 'Upgrade Agent API Token')"
   read_input "UPGRADE_API_TOKEN: " UPGRADE_API_TOKEN 1
   [[ -z "${UPGRADE_API_TOKEN:-}" ]] && fail "UPGRADE_API_TOKEN이 비어있습니다."
 }
@@ -102,20 +136,21 @@ install_skills() {
 
   local src_root
   src_root=$(find "$tmp/extract" -maxdepth 1 -mindepth 1 -type d | head -n1)
-  [[ -z "$src_root" || ! -d "$src_root/skills" ]] \
-    && fail "tarball 구조가 예상과 다릅니다 (skills/ 디렉토리 없음)."
+  [[ -z "$src_root" ]] && fail "tarball 구조가 예상과 다릅니다."
 
   mkdir -p "$SKILLS_ROOT" "$CLAUDE_SKILLS_DIR"
 
   local count=0
-  for skill_dir in "$src_root"/skills/*/; do
-    [[ -d "$skill_dir" ]] || continue
+  # 레포 루트의 각 디렉토리 중 SKILL.md가 있는 것만 스킬로 간주
+  for entry in "$src_root"/*/; do
+    [[ -d "$entry" ]] || continue
+    [[ -f "$entry/SKILL.md" ]] || continue
     local name
-    name=$(basename "$skill_dir")
+    name=$(basename "$entry")
 
     info "설치: $name"
     rm -rf "$SKILLS_ROOT/$name"
-    cp -R "$skill_dir" "$SKILLS_ROOT/$name"
+    cp -R "$entry" "$SKILLS_ROOT/$name"
 
     local link="$CLAUDE_SKILLS_DIR/$name"
     [[ -e "$link" || -L "$link" ]] && rm -f "$link"
@@ -124,44 +159,56 @@ install_skills() {
     count=$((count + 1))
   done
 
-  [[ "$count" -eq 0 ]] && fail "설치할 스킬이 없습니다."
+  [[ "$count" -eq 0 ]] && fail "설치할 스킬이 없습니다 (SKILL.md 보유 디렉토리를 찾지 못함)."
   info "스킬 $count개 설치 완료 ($SKILLS_ROOT)"
 }
 
-persist_token() {
-  local rc_file
-  rc_file=$(detect_rc_file)
+# rc 파일에 여러 export를 idempotent하게 기록
+persist_exports() {
+  local rc_file="$1"
   info "환경변수를 $rc_file 에 저장..."
 
   touch "$rc_file"
-  if grep -q '^export UPGRADE_API_TOKEN=' "$rc_file" 2>/dev/null; then
-    # macOS sed 호환: -i ''
-    sed -i.bak '/^export UPGRADE_API_TOKEN=/d' "$rc_file"
-    rm -f "$rc_file.bak"
-  fi
+
+  # 기존 라인 제거 (있다면)
+  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN; do
+    if grep -q "^export ${var}=" "$rc_file" 2>/dev/null; then
+      sed -i.bak "/^export ${var}=/d" "$rc_file"
+      rm -f "$rc_file.bak"
+    fi
+  done
+
+  # 기존 안내 블록도 제거 (재실행 시 중복 방지)
+  sed -i.bak '/^# agent-skills (added by install.sh)$/d' "$rc_file"
+  rm -f "$rc_file.bak"
+
   {
     echo ""
-    echo "# agent-skills: Upgrade API token (added by install.sh)"
+    echo "# agent-skills (added by install.sh)"
+    echo "export AGENT_SKILLS_GH_TOKEN=\"$GH_TOKEN\""
     echo "export UPGRADE_API_TOKEN=\"$UPGRADE_API_TOKEN\""
   } >> "$rc_file"
 
-  info "export UPGRADE_API_TOKEN 추가됨"
-  RC_FILE_PATH="$rc_file"
+  info "AGENT_SKILLS_GH_TOKEN / UPGRADE_API_TOKEN 저장됨"
 }
 
 main() {
   info "agent-skills installer"
   check_dependencies
-  prompt_tokens
+
+  local rc_file
+  rc_file=$(detect_rc_file)
+
+  resolve_tokens "$rc_file"
   verify_gh_token
   install_skills
-  persist_token
+  persist_exports "$rc_file"
 
   echo
   info "설치 완료"
   echo
   echo "  다음 중 하나를 실행해 환경변수를 적용하세요:"
-  echo "    source $RC_FILE_PATH"
+  echo "    source $rc_file"
   echo "    (또는 터미널을 새로 여세요)"
   echo
   echo "  Claude Code를 재시작하면 스킬이 활성화됩니다."
