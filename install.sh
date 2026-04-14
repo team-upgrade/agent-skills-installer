@@ -128,12 +128,17 @@ resolve_tokens() {
   echo
   info "GitHub Personal Access Token을 입력하세요"
   read_input "GH_TOKEN: " GH_TOKEN 1
-  [[ -z "${GH_TOKEN:-}" ]] && fail "GH_TOKEN이 비어있습니다."
+  if [[ -z "${GH_TOKEN:-}" ]]; then
+    fail "GH_TOKEN이 비어있습니다."
+  fi
 
   echo
   info "Upgrade API 토큰을 입력하세요"
   read_input "UPGRADE_API_TOKEN: " UPGRADE_API_TOKEN 1
-  [[ -z "${UPGRADE_API_TOKEN:-}" ]] && fail "UPGRADE_API_TOKEN이 비어있습니다."
+  if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
+    fail "UPGRADE_API_TOKEN이 비어있습니다."
+  fi
+  return 0
 }
 
 verify_gh_token() {
