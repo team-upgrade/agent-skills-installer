@@ -193,12 +193,20 @@ main() {
 
   local url="https://${GH_TOKEN}@github.com/${ORG}/${REPO}.git"
 
+  # set -u + 빈 배열 expansion이 "unbound variable"을 던지므로 길이로 가드
+  local -a npx_cmd=(npx skills@latest add "$url" -g)
+  if (( ${#skill_args[@]} > 0 )); then
+    npx_cmd+=("${skill_args[@]}")
+  fi
+  if (( ${#passthrough[@]} > 0 )); then
+    npx_cmd+=("${passthrough[@]}")
+  fi
+
   echo
   info "npx skills 실행 중..."
   echo
 
-  # -g 전역 설치 기본. passthrough에 -p 등이 있으면 vercel-labs/skills가 파싱
-  exec npx skills@latest add "$url" -g "${skill_args[@]}" "${passthrough[@]}"
+  exec "${npx_cmd[@]}"
 }
 
 main "$@"
