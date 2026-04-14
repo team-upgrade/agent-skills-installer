@@ -216,7 +216,22 @@ main() {
   if [[ ! -r /dev/tty ]]; then
     fail "/dev/tty를 읽을 수 없어 인터랙티브 설치가 불가능합니다. -y / --all 플래그 사용을 고려하세요."
   fi
-  exec "${npx_cmd[@]}" < /dev/tty
+
+  # exec 대신 subprocess로 실행: 설치 후 사후 안내를 이어갈 수 있도록.
+  if ! "${npx_cmd[@]}" < /dev/tty; then
+    fail "npx skills 설치 실패"
+  fi
+
+  echo
+  info "설치 완료"
+  if (( TOKENS_CHANGED )); then
+    echo
+    echo "  환경변수(\$UPGRADE_API_TOKEN 등)를 '현재 터미널'에 반영하려면:"
+    echo "    source $rc_file"
+    echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
+    echo
+    echo "  * 자식 프로세스는 부모 셸의 환경을 바꿀 수 없어 자동 source가 불가능합니다."
+  fi
 }
 
 main "$@"
