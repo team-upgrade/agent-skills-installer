@@ -15,16 +15,15 @@ REPO="agent-skills"
 BRANCH="main"
 SKILLS_ROOT="$HOME/.agents/skills"
 
-# 설치 가능한 에이전트 환경 (key:label:path)
-AGENT_ENV_KEYS=(claude codex hermes)
+# 명시적 심링크가 필요한 에이전트 환경만 나열.
+# OpenClaw / Codex 등은 ~/.agents/skills/를 자동으로 로드하므로 별도 항목 없음.
+AGENT_ENV_KEYS=(claude hermes)
 AGENT_ENV_LABELS=(
   "Claude Code    (~/.claude/skills/)"
-  "OpenClaw       (~/.codex/skills/)"
   "Hermes         (~/.hermes/skills/)"
 )
 AGENT_ENV_PATHS=(
   "$HOME/.claude/skills"
-  "$HOME/.codex/skills"
   "$HOME/.hermes/skills"
 )
 
@@ -48,7 +47,8 @@ agent-skills installer
   curl -sSL <URL> | bash -s -- <skill1> <skill2>      # 여러 스킬
   curl -sSL <URL> | bash -s -- -h                     # 도움말
 
-에이전트 환경(Claude Code / OpenClaw / Hermes)은 실행 중 체크박스로 선택합니다.
+추가로 심링크할 에이전트 환경(Claude Code / Hermes)은 실행 중 체크박스로 선택합니다.
+OpenClaw / Codex 는 ~/.agents/skills/ 를 자동 로드하므로 별도 선택 불필요.
 EOF
 }
 
@@ -158,9 +158,10 @@ verify_gh_token() {
   esac
 }
 
-# --- 체크박스 멀티셀렉트 UI -----------------------------------------------
-# 사용: preset_csv 에는 pre-check할 인덱스들 (0-based, 쉼표 구분). 빈 문자열이면 0번만 기본 선택.
-# 결과: 선택된 인덱스가 한 줄에 하나씩 stdout 출력.
+# --- 체크박스 멀티셀렉트 TUI ---------------------------------------------
+# 화살표(↑/↓): 커서 이동, Space: 토글, Enter: 완료
+# preset_csv: pre-check할 인덱스들 (0-based, 쉼표 구분). 빈 문자열이면 0번만 기본.
+# 결과: 선택된 인덱스를 한 줄에 하나씩 stdout 출력.
 multi_select() {
   local preset="$1"; shift
   local labels=("$@")
@@ -184,6 +185,7 @@ multi_select() {
     (( count > 0 )) && selected[0]=1
   fi
 
+  local cursor=0
   local old_stty=""
   old_stty=$(stty -g < /dev/tty 2>/dev/null || true)
 
@@ -193,38 +195,64 @@ multi_select() {
   }
   trap '_restore_tty; exit 130' INT TERM
 
+  # 라인-편집 끄기, 에코 끄기. -isig는 유지해 Ctrl+C가 SIGINT를 보내도록 함.
+  stty -echo -icanon < /dev/tty 2>/dev/null || true
   printf '\033[?25l' > /dev/tty 2>/dev/null || true
 
   local first=1
-  local lines_drawn=0
-
   while true; do
     if (( first )); then
       first=0
     else
-      # 이전 렌더를 덮기 위해 커서를 위로 이동 후 화면 끝까지 클리어
-      printf '\033[%dA\r\033[0J' "$lines_drawn" > /dev/tty
+      # 이전에 그린 N개의 아이템 라인을 걷어내고 재렌더
+      printf '\033[%dA\r\033[0J' "$count" > /dev/tty
     fi
 
-    printf '\n' > /dev/tty
     for ((i=0; i<count; i++)); do
       local mark=" "
       (( selected[i] )) && mark="x"
-      printf '  [%s] %d) %s\n' "$mark" "$((i+1))" "${labels[i]}" > /dev/tty
+      local arrow="  "
+      (( i == cursor )) && arrow="> "
+      if (( i == cursor )); then
+        # 커서 위치는 하이라이트 (cyan)
+        printf '\033[36m%s[%s] %s\033[0m\n' "$arrow" "$mark" "${labels[i]}" > /dev/tty
+      else
+        printf '%s[%s] %s\n' "$arrow" "$mark" "${labels[i]}" > /dev/tty
+      fi
     done
-    printf '  번호로 토글 / Enter로 완료: ' > /dev/tty
-    lines_drawn=$((count + 1))
 
-    local key=""
-    IFS= read -rsn1 key < /dev/tty || break
+    # 키 입력 (raw)
+    local k1=""
+    IFS= read -rsn1 k1 < /dev/tty || break
 
-    case "$key" in
-      ""|$'\n'|$'\r')
-        printf '\n' > /dev/tty
+    case "$k1" in
+      $'\n'|$'\r'|"")
+        # Enter — 완료
         break
         ;;
+      ' ')
+        # Space — 토글
+        selected[cursor]=$((1 - selected[cursor]))
+        ;;
+      $'\x1b')
+        # ESC — 화살표 시퀀스 (ESC [ A/B/C/D) 추가 2바이트 읽기
+        local rest=""
+        IFS= read -rsn2 -t 0.01 rest < /dev/tty || rest=""
+        case "$rest" in
+          '[A') (( cursor > 0 )) && cursor=$((cursor - 1)) ;;
+          '[B') (( cursor < count - 1 )) && cursor=$((cursor + 1)) ;;
+          *) : ;;
+        esac
+        ;;
+      k|K)
+        (( cursor > 0 )) && cursor=$((cursor - 1))
+        ;;
+      j|J)
+        (( cursor < count - 1 )) && cursor=$((cursor + 1))
+        ;;
       [0-9])
-        local idx=$((key - 1))
+        # 숫자 키 토글 (편의용)
+        local idx=$((k1 - 1))
         if (( idx >= 0 && idx < count )); then
           selected[idx]=$((1 - selected[idx]))
         fi
@@ -271,6 +299,8 @@ select_agent_envs() {
 
   echo
   info "설치할 에이전트 환경을 선택하세요"
+  echo "   (↑/↓ 이동, Space 토글, Enter 완료)"
+  echo
 
   local selected_indices
   selected_indices=$(multi_select "$preset" "${AGENT_ENV_LABELS[@]}")
