@@ -1,69 +1,84 @@
 # agent-skills-installer
 
-team-upgrade 사내 에이전트 스킬 설치 스크립트.
+team-upgrade 사내 에이전트 스킬 설치 스크립트. 실제 설치는 [`vercel-labs/skills`](https://github.com/vercel-labs/skills)(`npx skills`)에 위임하므로 Claude Code / Codex / OpenClaw / Gemini CLI 등 **45+ 에이전트**에 대응합니다.
 
-- **공통 (Codex, OpenClaw, Gemini 등)**: `~/.agents/skills/`에 설치 — 이들 에이전트가 자동 인식 (기본 선택)
-- **Claude Code**: `~/.claude/skills/`에 심링크/설치 — 필요하면 체크박스에서 추가 선택
+실제 스킬 본문은 프라이빗 레포 [`team-upgrade/agent-skills`](https://github.com/team-upgrade/agent-skills)에 있고, 이 레포는 **공개 부트스트랩 스크립트**만 제공합니다.
 
-실제 스킬 본문은 프라이빗 레포 [`team-upgrade/agent-skills`](https://github.com/team-upgrade/agent-skills)에 있고, 이 레포는 **공개 부트스트랩 설치 스크립트**만 제공합니다.
+## 사전 요구사항
+
+- **Node.js** — `npx`가 필요합니다. 없으면: `brew install node` 또는 https://nodejs.org
 
 ## 설치
 
-터미널에 아래 한 줄을 붙여넣기 (모든 스킬 설치):
+### 인터랙티브 (권장)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/team-upgrade/agent-skills-installer/main/install.sh | bash
 ```
 
-특정 스킬만 설치:
+토큰 2종 입력받은 뒤 `npx skills`가 자체 TUI로 스킬·에이전트 선택을 안내합니다.
+
+### 특정 스킬만
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/team-upgrade/agent-skills-installer/main/install.sh | bash -s -- upgrade-api
+curl -sSL .../install.sh | bash -s -- upgrade-api
 ```
 
-여러 스킬:
+### 스킬·에이전트 지정 + 비대화식
 
 ```bash
-curl -sSL .../install.sh | bash -s -- upgrade-api other-skill
+curl -sSL .../install.sh | bash -s -- upgrade-api -a claude-code -a codex -y
+```
+
+### 사용 가능한 스킬 목록 확인
+
+```bash
+curl -sSL .../install.sh | bash -s -- -l
 ```
 
 ## 입력받는 것
 
-1. **GitHub PAT** — `agent-skills` 레포 read 권한. 관리자에게 받아서 붙여넣기.
-2. **Upgrade API 토큰** — 백엔드 에이전트 API 호출용.
-3. **설치 대상 선택** — TUI 체크박스 (↑/↓ 이동, Space 토글, Enter 완료):
-   ```
-   > [x] 1) 공통 (Codex, OpenClaw, Gemini 등)    (~/.agents/skills/)
-     [ ] 2) Claude Code                          (~/.claude/skills/)
-   ```
-   기본값은 공통만 체크. Claude Code 사용자는 2번도 체크하세요.
+1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
+2. **Upgrade API 토큰** — 백엔드 에이전트 API 호출용
 
-## 설치되는 것
+한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다.
 
-- **공통 체크 시**: `~/.agents/skills/<skill-name>/`에 실제 파일. Codex/OpenClaw/Gemini 등이 자동 인식.
-- **Claude Code 체크 시**: `~/.claude/skills/<skill-name>`이 위 경로로의 심링크.
-- **Claude만 체크 시** (공통 미체크): `~/.claude/skills/<skill-name>/`에 직접 설치.
-- rc 파일에 `AGENT_SKILLS_GH_TOKEN`, `UPGRADE_API_TOKEN`, `AGENT_SKILLS_TARGETS` 저장.
+## 인자 포맷
 
-## 재실행 / 업데이트
+| 인자                         | 의미                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------ |
+| 위치 인자 (`upgrade-api` 등) | 설치할 스킬 이름 (여러 개 가능)                                                      |
+| `-a, --agent <name>`         | 설치할 에이전트 지정 (`claude-code`, `codex`, `openclaw`, `gemini-cli`, `cursor` 등) |
+| `-g, --global`               | 전역 설치 — 이 스크립트가 기본으로 추가함                                            |
+| `-y, --yes`                  | 확인 프롬프트 건너뛰기                                                               |
+| `--all`                      | 모든 스킬 × 모든 에이전트                                                            |
+| `--copy`                     | 심링크 대신 복사                                                                     |
+| `-l, --list`                 | 스킬 목록만 출력하고 설치 안 함                                                      |
 
-같은 커맨드를 다시 실행하면:
+지원 에이전트 전체 목록: [vercel-labs/skills README](https://github.com/vercel-labs/skills#supported-agents)
 
-- 기존 토큰 감지 → `[Y/n]`으로 재사용 또는 재입력
-- 이전에 선택한 에이전트 환경이 pre-check된 상태로 체크박스 등장
-- 스킬은 최신 버전으로 덮어쓰기
+## 업데이트 / 제거 / 조회
+
+설치 이후엔 `npx skills`를 직접 쓰면 됩니다:
+
+```bash
+npx skills list                      # 설치된 스킬 목록
+npx skills update upgrade-api        # 특정 스킬 업데이트
+npx skills remove upgrade-api        # 제거
+```
 
 ## 토큰 교체
 
-`[Y/n]`에서 `n`을 선택하면 새 토큰을 입력받습니다. rc 파일의 기존 export 라인은 자동 교체됩니다.
+rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
 
 ## 문제 해결
 
-- **스크립트가 조용히 꺼짐** — 최신 커밋으로 재실행. 문제 지속되면 Slack 채널에 공유.
-- **`GH_TOKEN 인증 실패`** — PAT 만료 가능성. 관리자에게 문의.
-- **스킬이 에이전트에서 안 보임** — 에이전트 앱을 완전히 재시작. `ls ~/.claude/skills/` (또는 `.codex`, `.hermes`)로 심링크 확인.
+- **`Node.js/npx가 필요합니다`** — `brew install node` 또는 https://nodejs.org 에서 설치.
+- **`GH_TOKEN 인증 실패`** — PAT 만료/오입력. 관리자에게 문의.
+- **에이전트가 스킬을 못 읽음** — 에이전트 앱 재시작. `npx skills list`로 설치 경로 확인.
 
 ## 관련 레포
 
-- **이 레포 (public)**: 부트스트랩 설치 스크립트만
+- **이 레포 (public)**: 부트스트랩 설치 스크립트
 - **[team-upgrade/agent-skills](https://github.com/team-upgrade/agent-skills) (private)**: 실제 스킬 본문
+- **[vercel-labs/skills](https://github.com/vercel-labs/skills)**: 내부적으로 쓰는 오픈소스 CLI
