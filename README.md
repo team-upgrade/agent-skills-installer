@@ -2,8 +2,8 @@
 
 team-upgrade 사내 에이전트 스킬 설치 스크립트.
 
-- **OpenClaw / Codex**: `~/.agents/skills/`에 설치만 하면 자동으로 읽힘 (선택 불필요)
-- **Claude Code / Hermes**: 전용 경로에 심링크가 필요해 설치 중 체크박스로 선택
+- **공통 (Codex, OpenClaw, Gemini 등)**: `~/.agents/skills/`에 설치 — 이들 에이전트가 자동 인식 (기본 선택)
+- **Claude Code**: `~/.claude/skills/`에 심링크/설치 — 필요하면 체크박스에서 추가 선택
 
 실제 스킬 본문은 프라이빗 레포 [`team-upgrade/agent-skills`](https://github.com/team-upgrade/agent-skills)에 있고, 이 레포는 **공개 부트스트랩 설치 스크립트**만 제공합니다.
 
@@ -31,18 +31,19 @@ curl -sSL .../install.sh | bash -s -- upgrade-api other-skill
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한. 관리자에게 받아서 붙여넣기.
 2. **Upgrade API 토큰** — 백엔드 에이전트 API 호출용.
-3. **에이전트 환경 선택** — TUI 체크박스로 여러 개 선택:
-   - Claude Code (`~/.claude/skills/`)
-   - Hermes (`~/.hermes/skills/`)
-
-   ↑/↓ 키로 이동, Space로 토글, Enter로 완료. 기본값은 Claude Code만 체크.
-   OpenClaw / Codex 는 `~/.agents/skills/`를 자동 로드하므로 별도 선택 없이 설치만으로 동작.
+3. **설치 대상 선택** — TUI 체크박스 (↑/↓ 이동, Space 토글, Enter 완료):
+   ```
+   > [x] 1) 공통 (Codex, OpenClaw, Gemini 등)    (~/.agents/skills/)
+     [ ] 2) Claude Code                          (~/.claude/skills/)
+   ```
+   기본값은 공통만 체크. Claude Code 사용자는 2번도 체크하세요.
 
 ## 설치되는 것
 
-- `~/.agents/skills/<skill-name>/` — 스킬 본문 (canonical)
-- 선택한 에이전트 환경 경로에 심링크
-- rc 파일에 `AGENT_SKILLS_GH_TOKEN`, `UPGRADE_API_TOKEN`, `AGENT_SKILLS_TARGETS` 저장
+- **공통 체크 시**: `~/.agents/skills/<skill-name>/`에 실제 파일. Codex/OpenClaw/Gemini 등이 자동 인식.
+- **Claude Code 체크 시**: `~/.claude/skills/<skill-name>`이 위 경로로의 심링크.
+- **Claude만 체크 시** (공통 미체크): `~/.claude/skills/<skill-name>/`에 직접 설치.
+- rc 파일에 `AGENT_SKILLS_GH_TOKEN`, `UPGRADE_API_TOKEN`, `AGENT_SKILLS_TARGETS` 저장.
 
 ## 재실행 / 업데이트
 

@@ -15,21 +15,18 @@ REPO="agent-skills"
 BRANCH="main"
 SKILLS_ROOT="$HOME/.agents/skills"
 
-# 명시적 심링크가 필요한 에이전트 환경만 나열.
-# OpenClaw / Codex 등은 ~/.agents/skills/를 자동으로 로드하므로 별도 항목 없음.
-AGENT_ENV_KEYS=(claude hermes)
+# 설치 대상. common은 ~/.agents/skills/ (Codex, OpenClaw, Gemini 등이 자동 로드).
+# claude는 ~/.claude/skills/로 별도 심링크.
+AGENT_ENV_KEYS=(common claude)
 AGENT_ENV_LABELS=(
-  "Claude Code    (~/.claude/skills/)"
-  "Hermes         (~/.hermes/skills/)"
-)
-AGENT_ENV_PATHS=(
-  "$HOME/.claude/skills"
-  "$HOME/.hermes/skills"
+  "공통 (Codex, OpenClaw, Gemini 등)    (~/.agents/skills/)"
+  "Claude Code                          (~/.claude/skills/)"
 )
 
 # 선택 결과 (select_agent_envs가 채움)
 SELECTED_ENV_KEYS=()
-SELECTED_ENV_PATHS=()
+INSTALL_COMMON=0
+INSTALL_CLAUDE=0
 
 info()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
 warn()  { printf "\033[33m!!!\033[0m %s\n" "$*"; }
@@ -47,8 +44,9 @@ agent-skills installer
   curl -sSL <URL> | bash -s -- <skill1> <skill2>      # 여러 스킬
   curl -sSL <URL> | bash -s -- -h                     # 도움말
 
-추가로 심링크할 에이전트 환경(Claude Code / Hermes)은 실행 중 체크박스로 선택합니다.
-OpenClaw / Codex 는 ~/.agents/skills/ 를 자동 로드하므로 별도 선택 불필요.
+설치 대상은 실행 중 TUI 체크박스로 선택합니다 (↑/↓ 이동, Space 토글, Enter 완료):
+  [x] 공통 (Codex, OpenClaw, Gemini 등) — ~/.agents/skills/
+  [ ] Claude Code                        — ~/.claude/skills/
 EOF
 }
 
@@ -306,18 +304,22 @@ select_agent_envs() {
   selected_indices=$(multi_select "$preset" "${AGENT_ENV_LABELS[@]}")
 
   SELECTED_ENV_KEYS=()
-  SELECTED_ENV_PATHS=()
+  INSTALL_COMMON=0
+  INSTALL_CLAUDE=0
   while IFS= read -r idx; do
     [[ -z "$idx" ]] && continue
-    SELECTED_ENV_KEYS+=("${AGENT_ENV_KEYS[$idx]}")
-    SELECTED_ENV_PATHS+=("${AGENT_ENV_PATHS[$idx]}")
+    local key="${AGENT_ENV_KEYS[$idx]}"
+    SELECTED_ENV_KEYS+=("$key")
+    case "$key" in
+      common) INSTALL_COMMON=1 ;;
+      claude) INSTALL_CLAUDE=1 ;;
+    esac
   done <<< "$selected_indices"
 
-  if (( ${#SELECTED_ENV_KEYS[@]} == 0 )); then
-    warn "에이전트 환경이 선택되지 않았습니다. ~/.agents/skills/에만 설치되고 심링크는 만들어지지 않습니다."
-  else
-    info "선택됨: ${SELECTED_ENV_KEYS[*]}"
+  if (( INSTALL_COMMON == 0 && INSTALL_CLAUDE == 0 )); then
+    fail "설치 대상을 하나 이상 선택해야 합니다."
   fi
+  info "선택됨: ${SELECTED_ENV_KEYS[*]}"
 }
 
 install_skills() {
@@ -342,15 +344,19 @@ install_skills() {
   src_root=$(find "$tmp/extract" -maxdepth 1 -mindepth 1 -type d | head -n1)
   [[ -z "$src_root" ]] && fail "tarball 구조가 예상과 다릅니다."
 
-  mkdir -p "$SKILLS_ROOT"
-  local target
-  for target in "${SELECTED_ENV_PATHS[@]:-}"; do
-    [[ -z "$target" ]] && continue
-    mkdir -p "$target"
-  done
+  # 실제 파일이 놓일 canonical 경로 결정:
+  # - 공통 선택 시: ~/.agents/skills/ (Codex, OpenClaw, Gemini 등이 자동 로드)
+  # - 공통 미선택이고 Claude만 선택 시: ~/.claude/skills/ 에 직접 설치
+  local canonical_root
+  if (( INSTALL_COMMON )); then
+    canonical_root="$SKILLS_ROOT"
+  else
+    canonical_root="$HOME/.claude/skills"
+  fi
+  mkdir -p "$canonical_root"
+  (( INSTALL_CLAUDE )) && mkdir -p "$HOME/.claude/skills"
 
   local count=0
-  local skipped=0
   for entry in "$src_root"/*/; do
     [[ -d "$entry" ]] || continue
     [[ -f "$entry/SKILL.md" ]] || continue
@@ -364,22 +370,20 @@ install_skills() {
         if [[ "$r" == "$name" ]]; then matched=1; break; fi
       done
       if (( matched == 0 )); then
-        skipped=$((skipped + 1))
         continue
       fi
     fi
 
     info "설치: $name"
-    rm -rf "$SKILLS_ROOT/$name"
-    cp -R "$entry" "$SKILLS_ROOT/$name"
+    rm -rf "$canonical_root/$name"
+    cp -R "$entry" "$canonical_root/$name"
 
-    # 선택된 각 에이전트 환경에 심링크
-    for target in "${SELECTED_ENV_PATHS[@]:-}"; do
-      [[ -z "$target" ]] && continue
-      local link="$target/$name"
+    # Claude Code 선택 + canonical이 ~/.agents인 경우 심링크
+    if (( INSTALL_CLAUDE )) && [[ "$canonical_root" != "$HOME/.claude/skills" ]]; then
+      local link="$HOME/.claude/skills/$name"
       [[ -e "$link" || -L "$link" ]] && rm -f "$link"
-      ln -s "$SKILLS_ROOT/$name" "$link"
-    done
+      ln -s "$canonical_root/$name" "$link"
+    fi
 
     count=$((count + 1))
   done
@@ -391,7 +395,7 @@ install_skills() {
       fail "설치할 스킬이 없습니다 (SKILL.md 보유 디렉토리를 찾지 못함)."
     fi
   fi
-  info "스킬 $count개 설치 완료 ($SKILLS_ROOT)"
+  info "스킬 $count개 설치 완료 ($canonical_root)"
 }
 
 persist_exports() {
