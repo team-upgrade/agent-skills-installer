@@ -63,15 +63,16 @@ check_dependencies() {
   command -v tar  >/dev/null 2>&1 || fail "tar가 필요합니다."
 }
 
-# rc 파일에서 export 라인 값만 추출
+# rc 파일에서 export 라인 값만 추출 (매칭 없어도 안전)
 read_existing_export() {
   local rc_file="$1"
   local var_name="$2"
-  [[ -f "$rc_file" ]] || { echo ""; return; }
-  # 마지막 매칭 라인에서 따옴표 안의 값만
-  grep "^export ${var_name}=" "$rc_file" 2>/dev/null \
-    | tail -n1 \
-    | sed -E "s/^export ${var_name}=\"(.*)\"\$/\1/"
+  [[ -f "$rc_file" ]] || { echo ""; return 0; }
+  local line=""
+  # grep이 매칭 실패해도 set -e로 죽지 않도록 || true
+  line=$(grep "^export ${var_name}=" "$rc_file" 2>/dev/null | tail -n1 || true)
+  [[ -z "$line" ]] && { echo ""; return 0; }
+  printf '%s\n' "$line" | sed -E "s/^export ${var_name}=\"(.*)\"\$/\1/"
 }
 
 resolve_tokens() {
