@@ -206,7 +206,12 @@ main() {
   info "npx skills 실행 중..."
   echo
 
-  exec "${npx_cmd[@]}"
+  # `curl | bash`로 실행하면 bash의 stdin은 파이프(EOF). npx의 인터랙티브 프롬프트가
+  # 입력 없다고 판단해 즉시 종료되므로 명시적으로 /dev/tty를 stdin으로 재지정.
+  if [[ ! -r /dev/tty ]]; then
+    fail "/dev/tty를 읽을 수 없어 인터랙티브 설치가 불가능합니다. -y / --all 플래그 사용을 고려하세요."
+  fi
+  exec "${npx_cmd[@]}" < /dev/tty
 }
 
 main "$@"
