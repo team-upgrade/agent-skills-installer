@@ -16,18 +16,20 @@ team-upgrade 사내 에이전트 스킬 설치 스크립트. 실제 설치는 [`
 curl -sSL https://raw.githubusercontent.com/team-upgrade/agent-skills-installer/main/install.sh | bash
 ```
 
-토큰 2종 입력받은 뒤 `npx skills`가 자체 TUI로 스킬·에이전트 선택을 안내합니다.
+토큰 2종과 upgrade-db read-only marker를 입력받은 뒤 `npx skills`가 자체 TUI로 스킬·에이전트 선택을 안내합니다.
 
 ### 특정 스킬만
 
 ```bash
 curl -sSL .../install.sh | bash -s -- upgrade-api
+curl -sSL .../install.sh | bash -s -- upgrade-db
 ```
 
 ### 스킬·에이전트 지정 + 비대화식
 
 ```bash
 curl -sSL .../install.sh | bash -s -- upgrade-api -a claude-code -a codex -y
+curl -sSL .../install.sh | bash -s -- upgrade-db -a codex -a openclaw -y
 ```
 
 ### 사용 가능한 스킬 목록 확인
@@ -40,14 +42,21 @@ curl -sSL .../install.sh | bash -s -- -l
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
 2. **Upgrade API 토큰** — 백엔드 에이전트 API 호출용
+3. **Upgrade DB read-only marker** — `QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true`
 
 한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다.
+
+`upgrade-db`의 실제 DB URL은 installer가 저장하지 않습니다. 실행 runtime에서 별도로 주입하세요:
+
+```bash
+export TEAM_UPGRADE_DB_QUERY_DATABASE_URL="<read-only db url>"
+```
 
 ## 인자 포맷
 
 | 인자                         | 의미                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------ |
-| 위치 인자 (`upgrade-api` 등) | 설치할 스킬 이름 (여러 개 가능)                                                      |
+| 위치 인자 (`upgrade-api`, `upgrade-db` 등) | 설치할 스킬 이름 (여러 개 가능)                                          |
 | `-a, --agent <name>`         | 설치할 에이전트 지정 (`claude-code`, `codex`, `openclaw`, `gemini-cli`, `cursor` 등) |
 | `-g, --global`               | 전역 설치 — 이 스크립트가 기본으로 추가함                                            |
 | `-y, --yes`                  | 확인 프롬프트 건너뛰기                                                               |
@@ -64,12 +73,13 @@ curl -sSL .../install.sh | bash -s -- -l
 ```bash
 npx skills list                      # 설치된 스킬 목록
 npx skills update upgrade-api        # 특정 스킬 업데이트
+npx skills update upgrade-db         # 특정 스킬 업데이트
 npx skills remove upgrade-api        # 제거
 ```
 
 ## 토큰 교체
 
-rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
+rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
 
 ## 문제 해결
 

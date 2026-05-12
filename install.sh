@@ -74,48 +74,68 @@ check_gh_token() {
 
 resolve_tokens() {
   local rc_file="$1"
-  local existing_gh existing_api http_code
+  local existing_gh existing_api existing_db_marker http_code
   existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
   existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
+  existing_db_marker=$(read_existing_export "$rc_file" "QUERYLEDGER_READ_ONLY_DB_CREDENTIAL")
 
   # 저장된 토큰이 둘 다 있고 GH 토큰이 유효하면 묻지 않고 그대로 사용
   if [[ -n "$existing_gh" && -n "$existing_api" ]]; then
     GH_TOKEN="$existing_gh"
     UPGRADE_API_TOKEN="$existing_api"
+    QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="${existing_db_marker:-}"
     http_code=$(check_gh_token)
     if [[ "$http_code" == "200" ]]; then
-      info "이미 등록된 토큰이 있습니다. (재입력 생략)"
-      TOKENS_CHANGED=0
-      return 0
+      if [[ "$existing_db_marker" == "true" ]]; then
+        info "이미 등록된 토큰이 있습니다. (재입력 생략)"
+        TOKENS_CHANGED=0
+        return 0
+      fi
+      info "이미 등록된 토큰이 있습니다. DB read-only marker만 추가합니다."
+      TOKENS_CHANGED=1
+    else
+      warn "저장된 GH 토큰이 유효하지 않습니다 (HTTP $http_code). 재입력하세요."
     fi
-    warn "저장된 GH 토큰이 유효하지 않습니다 (HTTP $http_code). 재입력하세요."
+  fi
+
+  if [[ "${http_code:-}" != "200" ]]; then
+    echo
+    info "GitHub Personal Access Token을 입력하세요"
+    read_input "GH_TOKEN: " GH_TOKEN 1
+    if [[ -z "${GH_TOKEN:-}" ]]; then
+      fail "GH_TOKEN이 비어있습니다."
+    fi
+    info "GitHub 토큰 검증 중..."
+    http_code=$(check_gh_token)
+    case "$http_code" in
+      200) info "GitHub 토큰 OK" ;;
+      401) fail "GH_TOKEN 인증 실패 (401)." ;;
+      403) fail "권한 부족 (403)." ;;
+      404) fail "$ORG/$REPO에 접근할 수 없습니다." ;;
+      *)   fail "GitHub API 응답 이상 (HTTP $http_code)" ;;
+    esac
+  fi
+
+  if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
+    echo
+    info "Upgrade API 토큰을 입력하세요"
+    if [[ -n "$existing_api" ]] && confirm "저장된 Upgrade API 토큰을 재사용할까요?"; then
+      UPGRADE_API_TOKEN="$existing_api"
+    else
+      read_input "UPGRADE_API_TOKEN: " UPGRADE_API_TOKEN 1
+      if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
+        fail "UPGRADE_API_TOKEN이 비어있습니다."
+      fi
+    fi
   fi
 
   echo
-  info "GitHub Personal Access Token을 입력하세요"
-  read_input "GH_TOKEN: " GH_TOKEN 1
-  if [[ -z "${GH_TOKEN:-}" ]]; then
-    fail "GH_TOKEN이 비어있습니다."
-  fi
-  info "GitHub 토큰 검증 중..."
-  http_code=$(check_gh_token)
-  case "$http_code" in
-    200) info "GitHub 토큰 OK" ;;
-    401) fail "GH_TOKEN 인증 실패 (401)." ;;
-    403) fail "권한 부족 (403)." ;;
-    404) fail "$ORG/$REPO에 접근할 수 없습니다." ;;
-    *)   fail "GitHub API 응답 이상 (HTTP $http_code)" ;;
-  esac
-
-  echo
-  info "Upgrade API 토큰을 입력하세요"
-  if [[ -n "$existing_api" ]] && confirm "저장된 Upgrade API 토큰을 재사용할까요?"; then
-    UPGRADE_API_TOKEN="$existing_api"
+  info "Upgrade DB read-only marker를 설정합니다"
+  if [[ "$existing_db_marker" == "true" ]] && confirm "저장된 QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true 를 재사용할까요?"; then
+    QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true
   else
-    read_input "UPGRADE_API_TOKEN: " UPGRADE_API_TOKEN 1
-    if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
-      fail "UPGRADE_API_TOKEN이 비어있습니다."
-    fi
+    warn "DB URL은 저장하지 않습니다. TEAM_UPGRADE_DB_QUERY_DATABASE_URL은 runtime env에서 별도로 주입하세요."
+    QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true
   fi
   return 0
 }
@@ -125,7 +145,7 @@ persist_exports() {
   info "환경변수를 $rc_file 에 저장..."
   touch "$rc_file"
   local var
-  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN; do
+  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN QUERYLEDGER_READ_ONLY_DB_CREDENTIAL; do
     if grep -q "^export ${var}=" "$rc_file" 2>/dev/null; then
       sed -i.bak "/^export ${var}=/d" "$rc_file"
       rm -f "$rc_file.bak"
@@ -138,6 +158,7 @@ persist_exports() {
     echo "# agent-skills (added by install.sh)"
     echo "export AGENT_SKILLS_GH_TOKEN=\"$GH_TOKEN\""
     echo "export UPGRADE_API_TOKEN=\"$UPGRADE_API_TOKEN\""
+    echo "export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=\"$QUERYLEDGER_READ_ONLY_DB_CREDENTIAL\""
   } >> "$rc_file"
 }
 
@@ -226,9 +247,12 @@ main() {
   info "설치 완료"
   if (( TOKENS_CHANGED )); then
     echo
-    echo "  환경변수(\$UPGRADE_API_TOKEN 등)를 '현재 터미널'에 반영하려면:"
+    echo "  환경변수(\$UPGRADE_API_TOKEN, \$QUERYLEDGER_READ_ONLY_DB_CREDENTIAL 등)를 '현재 터미널'에 반영하려면:"
     echo "    source $rc_file"
     echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
+    echo
+    echo "  upgrade-db 실행에는 별도 read-only DB URL이 필요합니다:"
+    echo "    export TEAM_UPGRADE_DB_QUERY_DATABASE_URL=\"<read-only db url>\""
     echo
     echo "  * 자식 프로세스는 부모 셸의 환경을 바꿀 수 없어 자동 source가 불가능합니다."
   fi
