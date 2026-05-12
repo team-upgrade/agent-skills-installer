@@ -78,12 +78,6 @@ resolve_tokens() {
   existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
   existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
   existing_db_marker=$(read_existing_export "$rc_file" "UPGRADE_DB_READ_ONLY_CREDENTIAL")
-  if [[ -z "$existing_db_marker" ]]; then
-    existing_db_marker=$(read_existing_export "$rc_file" "QUERYLEDGER_READ_ONLY_DB_CREDENTIAL")
-    if [[ "$existing_db_marker" == "true" ]]; then
-      TOKENS_CHANGED=1
-    fi
-  fi
 
   UPGRADE_API_TOKEN="${existing_api:-}"
   UPGRADE_DB_READ_ONLY_CREDENTIAL="${existing_db_marker:-}"
@@ -135,7 +129,7 @@ resolve_tokens() {
   if [[ "$need_db" == "1" && "$existing_db_marker" != "true" ]]; then
     echo
     info "Upgrade DB read-only marker를 설정합니다"
-    warn "DB URL은 저장하지 않습니다. TEAM_UPGRADE_DB_QUERY_DATABASE_URL은 runtime env에서 별도로 주입하세요."
+    warn "DB URL은 저장하지 않습니다. UPGRADE_DB_DATABASE_URL은 runtime env에서 별도로 주입하세요."
     UPGRADE_DB_READ_ONLY_CREDENTIAL=true
     TOKENS_CHANGED=1
   fi
@@ -147,7 +141,7 @@ persist_exports() {
   info "환경변수를 $rc_file 에 저장..."
   touch "$rc_file"
   local var
-  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN UPGRADE_DB_READ_ONLY_CREDENTIAL QUERYLEDGER_READ_ONLY_DB_CREDENTIAL; do
+  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN UPGRADE_DB_READ_ONLY_CREDENTIAL; do
     if grep -q "^export ${var}=" "$rc_file" 2>/dev/null; then
       sed -i.bak "/^export ${var}=/d" "$rc_file"
       rm -f "$rc_file.bak"
@@ -166,6 +160,26 @@ persist_exports() {
       echo "export UPGRADE_DB_READ_ONLY_CREDENTIAL=\"$UPGRADE_DB_READ_ONLY_CREDENTIAL\""
     fi
   } >> "$rc_file"
+}
+
+install_upgrade_db_cli() {
+  command -v npm >/dev/null 2>&1 || fail "upgrade-db CLI 설치에는 npm이 필요합니다. 설치: 'brew install node' 또는 https://nodejs.org"
+
+  info "upgrade-db CLI를 GitHub Packages에서 설치/업데이트 중..."
+  local npmrc
+  npmrc="$(mktemp /tmp/upgrade-db-npmrc.XXXXXX)"
+  chmod 600 "$npmrc"
+  {
+    echo "@team-upgrade:registry=https://npm.pkg.github.com"
+    echo "//npm.pkg.github.com/:_authToken=$GH_TOKEN"
+    echo "always-auth=true"
+  } > "$npmrc"
+
+  if ! npm_config_userconfig="$npmrc" npm install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com >/dev/null; then
+    rm -f "$npmrc"
+    fail "upgrade-db CLI GitHub Packages 설치 실패"
+  fi
+  rm -f "$npmrc"
 }
 
 usage() {
@@ -252,6 +266,9 @@ main() {
   if (( TOKENS_CHANGED )); then
     persist_exports "$rc_file"
   fi
+  if [[ "$need_db" == "1" ]]; then
+    install_upgrade_db_cli
+  fi
 
   local repo_url="https://github.com/${ORG}/${REPO}.git"
   local askpass
@@ -332,7 +349,7 @@ EOF
     echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
     echo
     echo "  upgrade-db 실행에는 별도 read-only DB URL이 필요합니다:"
-    echo "    export TEAM_UPGRADE_DB_QUERY_DATABASE_URL=\"<read-only db url>\""
+    echo "    export UPGRADE_DB_DATABASE_URL=\"<read-only db url>\""
     echo
     echo "  * 자식 프로세스는 부모 셸의 환경을 바꿀 수 없어 자동 source가 불가능합니다."
   fi

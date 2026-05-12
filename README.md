@@ -6,7 +6,7 @@ team-upgrade 사내 에이전트 스킬 설치 스크립트. 실제 설치는 [`
 
 ## 사전 요구사항
 
-- **Node.js** — `npx`가 필요합니다. 없으면: `brew install node` 또는 https://nodejs.org
+- **Node.js** — `npm`과 `npx`가 필요합니다. 없으면: `brew install node` 또는 https://nodejs.org
 
 ## 설치
 
@@ -44,12 +44,18 @@ curl -sSL .../install.sh | bash -s -- -l
 2. **Upgrade API 토큰** — `upgrade-api` 설치나 인터랙티브 전체 설치 시 필요
 3. **Upgrade DB read-only marker** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_READ_ONLY_CREDENTIAL=true` 저장
 
+`upgrade-db`를 설치하면 스킬 본문 설치와 별도로 CLI도 GitHub Packages에서 설치/업데이트합니다:
+
+```bash
+npm install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com
+```
+
 한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다. `upgrade-db`만 지정하면 `UPGRADE_API_TOKEN`은 요구하지 않습니다.
 
 `upgrade-db`의 실제 DB URL은 installer가 저장하지 않습니다. 실행 runtime에서 별도로 주입하세요:
 
 ```bash
-export TEAM_UPGRADE_DB_QUERY_DATABASE_URL="<read-only db url>"
+export UPGRADE_DB_DATABASE_URL="<read-only db url>"
 ```
 
 ## 인자 포맷

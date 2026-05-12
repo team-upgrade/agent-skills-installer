@@ -34,6 +34,10 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$HOME/npx-args.txt"
 EOF
+  cat > "$dir/bin/npm" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$HOME/npm-args.txt"
+EOF
   cat > "$dir/bin/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "clone" ]]; then
@@ -47,7 +51,7 @@ fi
 printf 'unexpected git args: %s\n' "$*" >&2
 exit 1
 EOF
-  chmod +x "$dir/bin/curl" "$dir/bin/git" "$dir/bin/npx"
+  chmod +x "$dir/bin/curl" "$dir/bin/git" "$dir/bin/npm" "$dir/bin/npx"
 }
 
 run_installer() {
@@ -66,8 +70,8 @@ test_upgrade_db_only_does_not_require_api_token() {
   run_installer "$home" upgrade-db -a codex -a openclaw -y
 
   assert_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL="true"'
-  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
+  assert_contains "$home/npm-args.txt" 'install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com'
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-db -a codex -a openclaw -y'
   assert_not_contains "$home/npx-args.txt" 'dummy-gh'
@@ -90,7 +94,10 @@ test_upgrade_api_only_does_not_write_db_marker() {
 
   assert_contains "$home/.zshrc" 'UPGRADE_API_TOKEN="dummy-api"'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
-  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
+  if [[ -f "$home/npm-args.txt" ]]; then
+    printf 'upgrade-api-only should not install upgrade-db CLI\n' >&2
+    exit 1
+  fi
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-api -a codex -y'
   assert_not_contains "$home/npx-args.txt" 'dummy-gh'
@@ -109,32 +116,18 @@ test_list_mode_only_needs_github_token() {
 
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
-  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
+  if [[ -f "$home/npm-args.txt" ]]; then
+    printf 'list mode should not install upgrade-db CLI\n' >&2
+    exit 1
+  fi
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-l'
   assert_not_contains "$home/npx-args.txt" 'dummy-gh'
   assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
 }
 
-test_legacy_db_marker_migrates_to_upgrade_db_name() {
-  local home
-  home="$(mktemp -d)"
-  trap 'rm -rf "$home"' RETURN
-  make_fake_bin "$home"
-  {
-    printf 'export AGENT_SKILLS_GH_TOKEN="dummy-gh"\n'
-    printf 'export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="true"\n'
-  } > "$home/.zshrc"
-
-  run_installer "$home" upgrade-db -a codex -y
-
-  assert_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL="true"'
-  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
-}
-
 test_upgrade_db_only_does_not_require_api_token
 test_upgrade_api_only_does_not_write_db_marker
 test_list_mode_only_needs_github_token
-test_legacy_db_marker_migrates_to_upgrade_db_name
 
 printf 'installer tests passed\n'
