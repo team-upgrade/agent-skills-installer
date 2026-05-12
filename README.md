@@ -16,7 +16,7 @@ team-upgrade 사내 에이전트 스킬 설치 스크립트. 실제 설치는 [`
 curl -sSL https://raw.githubusercontent.com/team-upgrade/agent-skills-installer/main/install.sh | bash
 ```
 
-토큰 2종과 upgrade-db read-only marker를 입력받은 뒤 `npx skills`가 자체 TUI로 스킬·에이전트 선택을 안내합니다.
+필요한 인증값을 입력받은 뒤 `npx skills`가 자체 TUI로 스킬·에이전트 선택을 안내합니다. 스킬을 지정하지 않는 인터랙티브 설치에서는 `upgrade-api`, `upgrade-db`를 모두 선택할 수 있으므로 두 스킬의 env를 함께 준비합니다.
 
 ### 특정 스킬만
 
@@ -41,10 +41,10 @@ curl -sSL .../install.sh | bash -s -- -l
 ## 입력받는 것
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
-2. **Upgrade API 토큰** — 백엔드 에이전트 API 호출용
-3. **Upgrade DB read-only marker** — `QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true`
+2. **Upgrade API 토큰** — `upgrade-api` 설치나 인터랙티브 전체 설치 시 필요
+3. **Upgrade DB read-only marker** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true` 저장
 
-한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다.
+한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다. `upgrade-db`만 지정하면 `UPGRADE_API_TOKEN`은 요구하지 않습니다.
 
 `upgrade-db`의 실제 DB URL은 installer가 저장하지 않습니다. 실행 runtime에서 별도로 주입하세요:
 

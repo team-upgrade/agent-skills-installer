@@ -15,8 +15,8 @@ set -euo pipefail
 ORG="team-upgrade"
 REPO="agent-skills"
 
-# 토큰이 새로 입력되어 rc 파일에 저장이 필요한지 추적 (재사용 시 0)
-TOKENS_CHANGED=1
+# 토큰/marker가 새로 입력되어 rc 파일에 저장이 필요한지 추적
+TOKENS_CHANGED=0
 
 info()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
 warn()  { printf "\033[33m!!!\033[0m %s\n" "$*"; }
@@ -73,26 +73,21 @@ check_gh_token() {
 }
 
 resolve_tokens() {
-  local rc_file="$1"
+  local rc_file="$1" need_api="$2" need_db="$3"
   local existing_gh existing_api existing_db_marker http_code
   existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
   existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
   existing_db_marker=$(read_existing_export "$rc_file" "QUERYLEDGER_READ_ONLY_DB_CREDENTIAL")
 
-  # 저장된 토큰이 둘 다 있고 GH 토큰이 유효하면 묻지 않고 그대로 사용
-  if [[ -n "$existing_gh" && -n "$existing_api" ]]; then
+  UPGRADE_API_TOKEN="${existing_api:-}"
+  QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="${existing_db_marker:-}"
+
+  # 저장된 GH 토큰이 유효하면 묻지 않고 그대로 사용
+  if [[ -n "$existing_gh" ]]; then
     GH_TOKEN="$existing_gh"
-    UPGRADE_API_TOKEN="$existing_api"
-    QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="${existing_db_marker:-}"
     http_code=$(check_gh_token)
     if [[ "$http_code" == "200" ]]; then
-      if [[ "$existing_db_marker" == "true" ]]; then
-        info "이미 등록된 토큰이 있습니다. (재입력 생략)"
-        TOKENS_CHANGED=0
-        return 0
-      fi
-      info "이미 등록된 토큰이 있습니다. DB read-only marker만 추가합니다."
-      TOKENS_CHANGED=1
+      info "이미 등록된 GitHub 토큰이 있습니다. (재입력 생략)"
     else
       warn "저장된 GH 토큰이 유효하지 않습니다 (HTTP $http_code). 재입력하세요."
     fi
@@ -114,9 +109,10 @@ resolve_tokens() {
       404) fail "$ORG/$REPO에 접근할 수 없습니다." ;;
       *)   fail "GitHub API 응답 이상 (HTTP $http_code)" ;;
     esac
+    TOKENS_CHANGED=1
   fi
 
-  if [[ -z "${UPGRADE_API_TOKEN:-}" ]]; then
+  if [[ "$need_api" == "1" && -z "${UPGRADE_API_TOKEN:-}" ]]; then
     echo
     info "Upgrade API 토큰을 입력하세요"
     if [[ -n "$existing_api" ]] && confirm "저장된 Upgrade API 토큰을 재사용할까요?"; then
@@ -127,15 +123,15 @@ resolve_tokens() {
         fail "UPGRADE_API_TOKEN이 비어있습니다."
       fi
     fi
+    TOKENS_CHANGED=1
   fi
 
-  echo
-  info "Upgrade DB read-only marker를 설정합니다"
-  if [[ "$existing_db_marker" == "true" ]] && confirm "저장된 QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true 를 재사용할까요?"; then
-    QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true
-  else
+  if [[ "$need_db" == "1" && "$existing_db_marker" != "true" ]]; then
+    echo
+    info "Upgrade DB read-only marker를 설정합니다"
     warn "DB URL은 저장하지 않습니다. TEAM_UPGRADE_DB_QUERY_DATABASE_URL은 runtime env에서 별도로 주입하세요."
     QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true
+    TOKENS_CHANGED=1
   fi
   return 0
 }
@@ -157,8 +153,12 @@ persist_exports() {
     echo ""
     echo "# agent-skills (added by install.sh)"
     echo "export AGENT_SKILLS_GH_TOKEN=\"$GH_TOKEN\""
-    echo "export UPGRADE_API_TOKEN=\"$UPGRADE_API_TOKEN\""
-    echo "export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=\"$QUERYLEDGER_READ_ONLY_DB_CREDENTIAL\""
+    if [[ -n "${UPGRADE_API_TOKEN:-}" ]]; then
+      echo "export UPGRADE_API_TOKEN=\"$UPGRADE_API_TOKEN\""
+    fi
+    if [[ -n "${QUERYLEDGER_READ_ONLY_DB_CREDENTIAL:-}" ]]; then
+      echo "export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=\"$QUERYLEDGER_READ_ONLY_DB_CREDENTIAL\""
+    fi
   } >> "$rc_file"
 }
 
@@ -202,13 +202,9 @@ main() {
   local rc_file
   rc_file=$(detect_rc_file)
 
-  resolve_tokens "$rc_file"
-  if (( TOKENS_CHANGED )); then
-    persist_exports "$rc_file"
-  fi
-
   # 인자 분해: 위치 인자(스킬 이름) → -s 플래그, 나머지(-...)는 passthrough
   local -a skill_args=() passthrough=()
+  local need_api=1 need_db=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -*) passthrough+=("$1") ;;
@@ -216,6 +212,27 @@ main() {
     esac
     shift
   done
+
+  if (( ${#skill_args[@]} > 0 )); then
+    need_api=0
+    need_db=0
+    local i skill
+    for (( i = 1; i < ${#skill_args[@]}; i += 2 )); do
+      skill="${skill_args[$i]}"
+      case "$skill" in
+        upgrade-api) need_api=1 ;;
+        upgrade-db) need_db=1 ;;
+      esac
+    done
+  elif [[ " ${passthrough[*]} " == *" -l "* || " ${passthrough[*]} " == *" --list "* ]]; then
+    need_api=0
+    need_db=0
+  fi
+
+  resolve_tokens "$rc_file" "$need_api" "$need_db"
+  if (( TOKENS_CHANGED )); then
+    persist_exports "$rc_file"
+  fi
 
   local url="https://${GH_TOKEN}@github.com/${ORG}/${REPO}.git"
 
@@ -247,7 +264,7 @@ main() {
   info "설치 완료"
   if (( TOKENS_CHANGED )); then
     echo
-    echo "  환경변수(\$UPGRADE_API_TOKEN, \$QUERYLEDGER_READ_ONLY_DB_CREDENTIAL 등)를 '현재 터미널'에 반영하려면:"
+    echo "  저장된 환경변수를 '현재 터미널'에 반영하려면:"
     echo "    source $rc_file"
     echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
     echo
