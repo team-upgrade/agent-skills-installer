@@ -42,7 +42,7 @@ curl -sSL .../install.sh | bash -s -- -l
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
 2. **Upgrade API 토큰** — `upgrade-api` 설치나 인터랙티브 전체 설치 시 필요
-3. **Upgrade DB read-only marker** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=true` 저장
+3. **Upgrade DB read-only marker** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_READ_ONLY_CREDENTIAL=true` 저장
 
 한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다. `upgrade-db`만 지정하면 `UPGRADE_API_TOKEN`은 요구하지 않습니다.
 
@@ -86,7 +86,7 @@ scripts/test-installer.sh
 
 ## 토큰 교체
 
-rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
+rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export UPGRADE_DB_READ_ONLY_CREDENTIAL=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
 
 ## 문제 해결
 

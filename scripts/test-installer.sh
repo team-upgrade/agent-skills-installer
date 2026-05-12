@@ -65,7 +65,8 @@ test_upgrade_db_only_does_not_require_api_token() {
 
   run_installer "$home" upgrade-db -a codex -a openclaw -y
 
-  assert_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="true"'
+  assert_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL="true"'
+  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-db -a codex -a openclaw -y'
@@ -88,6 +89,7 @@ test_upgrade_api_only_does_not_write_db_marker() {
   run_installer "$home" upgrade-api -a codex -y
 
   assert_contains "$home/.zshrc" 'UPGRADE_API_TOKEN="dummy-api"'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
   assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-api -a codex -y'
@@ -106,6 +108,7 @@ test_list_mode_only_needs_github_token() {
   run_installer "$home" -l
 
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
   assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-l'
@@ -113,8 +116,25 @@ test_list_mode_only_needs_github_token() {
   assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
 }
 
+test_legacy_db_marker_migrates_to_upgrade_db_name() {
+  local home
+  home="$(mktemp -d)"
+  trap 'rm -rf "$home"' RETURN
+  make_fake_bin "$home"
+  {
+    printf 'export AGENT_SKILLS_GH_TOKEN="dummy-gh"\n'
+    printf 'export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="true"\n'
+  } > "$home/.zshrc"
+
+  run_installer "$home" upgrade-db -a codex -y
+
+  assert_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL="true"'
+  assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
+}
+
 test_upgrade_db_only_does_not_require_api_token
 test_upgrade_api_only_does_not_write_db_marker
 test_list_mode_only_needs_github_token
+test_legacy_db_marker_migrates_to_upgrade_db_name
 
 printf 'installer tests passed\n'
