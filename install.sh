@@ -195,6 +195,7 @@ main() {
   info "agent-skills installer"
 
   command -v curl >/dev/null 2>&1 || fail "curl이 필요합니다."
+  command -v git >/dev/null 2>&1 || fail "git이 필요합니다."
   if ! command -v npx >/dev/null 2>&1; then
     fail "Node.js/npx가 필요합니다. 설치: 'brew install node' 또는 https://nodejs.org"
   fi
@@ -246,10 +247,47 @@ main() {
     persist_exports "$rc_file"
   fi
 
-  local url="https://${GH_TOKEN}@github.com/${ORG}/${REPO}.git"
+  local repo_url="https://github.com/${ORG}/${REPO}.git"
+  local askpass
+  askpass="$(mktemp /tmp/agent-skills-git-askpass.XXXXXX)"
+  AGENT_SKILLS_ASKPASS_FILE="$askpass"
+  chmod 700 "$askpass"
+  cat > "$askpass" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *Password*) printf '%s\n' "${AGENT_SKILLS_GH_TOKEN:?}" ;;
+  *) printf '\n' ;;
+esac
+EOF
+  local git_auth_home
+  git_auth_home="$(mktemp -d /tmp/agent-skills-git-home.XXXXXX)"
+  AGENT_SKILLS_GIT_AUTH_HOME="$git_auth_home"
+  chmod 700 "$git_auth_home"
+  {
+    echo "machine github.com"
+    echo "  login x-access-token"
+    echo "  password $GH_TOKEN"
+  } > "$git_auth_home/.netrc"
+  chmod 600 "$git_auth_home/.netrc"
+  trap 'rm -f "${AGENT_SKILLS_ASKPASS_FILE:-}"; rm -rf "${AGENT_SKILLS_GIT_AUTH_HOME:-}"' EXIT
+
+  local source_dir="$HOME/.cache/agent-skills/sources/${ORG}-${REPO}"
+  mkdir -p "$(dirname "$source_dir")"
+  if [[ -d "$source_dir/.git" ]]; then
+    info "agent-skills source 업데이트 중..."
+    HOME="$git_auth_home" AGENT_SKILLS_GH_TOKEN="$GH_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+      git -C "$source_dir" pull --ff-only >/dev/null
+  elif [[ -e "$source_dir" ]]; then
+    fail "$source_dir 가 git checkout이 아닙니다. 확인 후 제거하거나 이동하세요."
+  else
+    info "agent-skills source 준비 중..."
+    HOME="$git_auth_home" AGENT_SKILLS_GH_TOKEN="$GH_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+      git clone --depth=1 "$repo_url" "$source_dir" >/dev/null
+  fi
 
   # set -u + 빈 배열 expansion이 "unbound variable"을 던지므로 길이로 가드
-  local -a npx_cmd=(npx skills@latest add "$url" -g)
+  local -a npx_cmd=(npx skills@latest add "$source_dir" -g)
   if (( ${#skill_args[@]} > 0 )); then
     npx_cmd+=("${skill_args[@]}")
   fi
@@ -269,9 +307,9 @@ main() {
   esac
   if ! {
     if [[ "$noninteractive" == "1" ]]; then
-      "${npx_cmd[@]}"
+      AGENT_SKILLS_GH_TOKEN="$GH_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 "${npx_cmd[@]}"
     elif [[ -r /dev/tty ]]; then
-      "${npx_cmd[@]}" < /dev/tty
+      AGENT_SKILLS_GH_TOKEN="$GH_TOKEN" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 "${npx_cmd[@]}" < /dev/tty
     else
       fail "/dev/tty를 읽을 수 없어 인터랙티브 설치가 불가능합니다. -y / --all 플래그 사용을 고려하세요."
     fi

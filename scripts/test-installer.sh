@@ -34,7 +34,20 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$HOME/npx-args.txt"
 EOF
-  chmod +x "$dir/bin/curl" "$dir/bin/npx"
+  cat > "$dir/bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "clone" ]]; then
+  dest="${@: -1}"
+  mkdir -p "$dest/.git"
+  exit 0
+fi
+if [[ "$1" == "-C" ]]; then
+  exit 0
+fi
+printf 'unexpected git args: %s\n' "$*" >&2
+exit 1
+EOF
+  chmod +x "$dir/bin/curl" "$dir/bin/git" "$dir/bin/npx"
 }
 
 run_installer() {
@@ -54,7 +67,10 @@ test_upgrade_db_only_does_not_require_api_token() {
 
   assert_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL="true"'
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
+  assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-db -a codex -a openclaw -y'
+  assert_not_contains "$home/npx-args.txt" 'dummy-gh'
+  assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
   assert_not_contains "$home/npx-args.txt" '-s codex'
   assert_not_contains "$home/npx-args.txt" '-s openclaw'
 }
@@ -73,7 +89,10 @@ test_upgrade_api_only_does_not_write_db_marker() {
 
   assert_contains "$home/.zshrc" 'UPGRADE_API_TOKEN="dummy-api"'
   assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
+  assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-api -a codex -y'
+  assert_not_contains "$home/npx-args.txt" 'dummy-gh'
+  assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
   assert_not_contains "$home/npx-args.txt" '-s codex'
 }
 
@@ -88,7 +107,10 @@ test_list_mode_only_needs_github_token() {
 
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
   assert_not_contains "$home/.zshrc" 'QUERYLEDGER_READ_ONLY_DB_CREDENTIAL'
+  assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-l'
+  assert_not_contains "$home/npx-args.txt" 'dummy-gh'
+  assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
 }
 
 test_upgrade_db_only_does_not_require_api_token
