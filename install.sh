@@ -207,6 +207,18 @@ main() {
   local need_api=1 need_db=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -a|--agent)
+        local opt="$1"
+        passthrough+=("$opt")
+        shift
+        [[ $# -gt 0 ]] || fail "$opt requires a value"
+        passthrough+=("$1")
+        ;;
+      --skill)
+        shift
+        [[ $# -gt 0 ]] || fail "--skill requires a value"
+        skill_args+=(-s "$1")
+        ;;
       -*) passthrough+=("$1") ;;
       *)  skill_args+=(-s "$1") ;;
     esac
@@ -249,14 +261,21 @@ main() {
   info "npx skills 실행 중..."
   echo
 
-  # `curl | bash`로 실행하면 bash의 stdin은 파이프(EOF). npx의 인터랙티브 프롬프트가
-  # 입력 없다고 판단해 즉시 종료되므로 명시적으로 /dev/tty를 stdin으로 재지정.
-  if [[ ! -r /dev/tty ]]; then
-    fail "/dev/tty를 읽을 수 없어 인터랙티브 설치가 불가능합니다. -y / --all 플래그 사용을 고려하세요."
-  fi
-
-  # exec 대신 subprocess로 실행: 설치 후 사후 안내를 이어갈 수 있도록.
-  if ! "${npx_cmd[@]}" < /dev/tty; then
+  # `curl | bash`로 실행하면 bash의 stdin은 파이프(EOF). 인터랙티브 모드에서는
+  # /dev/tty로 연결하고, -y/--yes 또는 -l/--list 같은 비대화식 모드는 stdin 없이 실행한다.
+  local noninteractive=0
+  case " ${passthrough[*]} " in
+    *" -y "*|*" --yes "*|*" -l "*|*" --list "*) noninteractive=1 ;;
+  esac
+  if ! {
+    if [[ "$noninteractive" == "1" ]]; then
+      "${npx_cmd[@]}"
+    elif [[ -r /dev/tty ]]; then
+      "${npx_cmd[@]}" < /dev/tty
+    else
+      fail "/dev/tty를 읽을 수 없어 인터랙티브 설치가 불가능합니다. -y / --all 플래그 사용을 고려하세요."
+    fi
+  }; then
     fail "npx skills 설치 실패"
   fi
 

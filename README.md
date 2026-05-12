@@ -77,6 +77,13 @@ npx skills update upgrade-db         # 특정 스킬 업데이트
 npx skills remove upgrade-api        # 제거
 ```
 
+## 검증
+
+```bash
+bash -n install.sh
+scripts/test-installer.sh
+```
+
 ## 토큰 교체
 
 rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export QUERYLEDGER_READ_ONLY_DB_CREDENTIAL=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
