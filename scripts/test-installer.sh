@@ -65,16 +65,24 @@ test_upgrade_db_only_does_not_require_api_token() {
   home="$(mktemp -d)"
   trap 'rm -rf "$home"' RETURN
   make_fake_bin "$home"
-  printf 'export AGENT_SKILLS_GH_TOKEN="dummy-gh"\n' > "$home/.zshrc"
+  {
+    printf 'export AGENT_SKILLS_GH_TOKEN="dummy-gh"\n'
+    printf 'export UPGRADE_DB_API_URL="https://upgrade-db.example"\n'
+    printf 'export UPGRADE_DB_API_TOKEN="dummy-db-token"\n'
+  } > "$home/.zshrc"
 
   run_installer "$home" upgrade-db -a codex -a openclaw -y
 
-  assert_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL="true"'
+  assert_contains "$home/.zshrc" 'UPGRADE_DB_API_URL="https://upgrade-db.example"'
+  assert_contains "$home/.zshrc" 'UPGRADE_DB_API_TOKEN="dummy-db-token"'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_DATABASE_URL'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
   assert_contains "$home/npm-args.txt" 'install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com'
   assert_contains "$home/npx-args.txt" "$home/.cache/agent-skills/sources/team-upgrade-agent-skills"
   assert_contains "$home/npx-args.txt" '-s upgrade-db -a codex -a openclaw -y'
   assert_not_contains "$home/npx-args.txt" 'dummy-gh'
+  assert_not_contains "$home/npx-args.txt" 'dummy-db-token'
   assert_not_contains "$home/npx-args.txt" 'https://github.com/team-upgrade/agent-skills.git'
   assert_not_contains "$home/npx-args.txt" '-s codex'
   assert_not_contains "$home/npx-args.txt" '-s openclaw'
@@ -93,6 +101,7 @@ test_upgrade_api_only_does_not_write_db_marker() {
   run_installer "$home" upgrade-api -a codex -y
 
   assert_contains "$home/.zshrc" 'UPGRADE_API_TOKEN="dummy-api"'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_API_TOKEN'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
   if [[ -f "$home/npm-args.txt" ]]; then
     printf 'upgrade-api-only should not install upgrade-db CLI\n' >&2
@@ -115,6 +124,7 @@ test_list_mode_only_needs_github_token() {
   run_installer "$home" -l
 
   assert_not_contains "$home/.zshrc" 'UPGRADE_API_TOKEN'
+  assert_not_contains "$home/.zshrc" 'UPGRADE_DB_API_TOKEN'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
   if [[ -f "$home/npm-args.txt" ]]; then
     printf 'list mode should not install upgrade-db CLI\n' >&2

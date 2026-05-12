@@ -42,7 +42,7 @@ curl -sSL .../install.sh | bash -s -- -l
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
 2. **Upgrade API 토큰** — `upgrade-api` 설치나 인터랙티브 전체 설치 시 필요
-3. **Upgrade DB read-only marker** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_READ_ONLY_CREDENTIAL=true` 저장
+3. **Upgrade DB gateway URL/token** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_API_URL`, `UPGRADE_DB_API_TOKEN` 저장
 
 `upgrade-db`를 설치하면 스킬 본문 설치와 별도로 CLI도 GitHub Packages에서 설치/업데이트합니다:
 
@@ -52,10 +52,11 @@ npm install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com
 
 한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다. `upgrade-db`만 지정하면 `UPGRADE_API_TOKEN`은 요구하지 않습니다.
 
-`upgrade-db`의 실제 DB URL은 installer가 저장하지 않습니다. 실행 runtime에서 별도로 주입하세요:
+`upgrade-db`는 외부 에이전트에 DB URL을 주지 않습니다. 외부 실행 runtime은 gateway URL/token만 사용합니다:
 
 ```bash
-export UPGRADE_DB_DATABASE_URL="<read-only db url>"
+export UPGRADE_DB_API_URL="https://<upgrade-db-gateway>"
+export UPGRADE_DB_API_TOKEN="<permanent upgrade-db cli token>"
 ```
 
 ## 인자 포맷
@@ -92,7 +93,7 @@ scripts/test-installer.sh
 
 ## 토큰 교체
 
-rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export UPGRADE_DB_READ_ONLY_CREDENTIAL=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
+rc 파일에서 기존 `export AGENT_SKILLS_GH_TOKEN=...` / `export UPGRADE_API_TOKEN=...` / `export UPGRADE_DB_API_URL=...` / `export UPGRADE_DB_API_TOKEN=...` 라인을 삭제한 뒤 스크립트를 다시 실행하면 새 값을 입력받습니다.
 
 ## 문제 해결
 

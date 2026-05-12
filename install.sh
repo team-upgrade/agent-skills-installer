@@ -15,7 +15,7 @@ set -euo pipefail
 ORG="team-upgrade"
 REPO="agent-skills"
 
-# 토큰/marker가 새로 입력되어 rc 파일에 저장이 필요한지 추적
+# 토큰/gateway 설정이 새로 입력되어 rc 파일에 저장이 필요한지 추적
 TOKENS_CHANGED=0
 
 info()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
@@ -74,13 +74,15 @@ check_gh_token() {
 
 resolve_tokens() {
   local rc_file="$1" need_api="$2" need_db="$3"
-  local existing_gh existing_api existing_db_marker http_code
+  local existing_gh existing_api existing_db_api_url existing_db_api_token http_code
   existing_gh=$(read_existing_export "$rc_file" "AGENT_SKILLS_GH_TOKEN")
   existing_api=$(read_existing_export "$rc_file" "UPGRADE_API_TOKEN")
-  existing_db_marker=$(read_existing_export "$rc_file" "UPGRADE_DB_READ_ONLY_CREDENTIAL")
+  existing_db_api_url=$(read_existing_export "$rc_file" "UPGRADE_DB_API_URL")
+  existing_db_api_token=$(read_existing_export "$rc_file" "UPGRADE_DB_API_TOKEN")
 
   UPGRADE_API_TOKEN="${existing_api:-}"
-  UPGRADE_DB_READ_ONLY_CREDENTIAL="${existing_db_marker:-}"
+  UPGRADE_DB_API_URL="${existing_db_api_url:-}"
+  UPGRADE_DB_API_TOKEN="${existing_db_api_token:-}"
 
   # 저장된 GH 토큰이 유효하면 묻지 않고 그대로 사용
   if [[ -n "$existing_gh" ]]; then
@@ -126,11 +128,22 @@ resolve_tokens() {
     TOKENS_CHANGED=1
   fi
 
-  if [[ "$need_db" == "1" && "$existing_db_marker" != "true" ]]; then
+  if [[ "$need_db" == "1" && ( -z "${UPGRADE_DB_API_URL:-}" || -z "${UPGRADE_DB_API_TOKEN:-}" ) ]]; then
     echo
-    info "Upgrade DB read-only marker를 설정합니다"
-    warn "DB URL은 저장하지 않습니다. UPGRADE_DB_DATABASE_URL은 runtime env에서 별도로 주입하세요."
-    UPGRADE_DB_READ_ONLY_CREDENTIAL=true
+    info "Upgrade DB gateway 정보를 입력하세요"
+    warn "DB URL은 저장하지 않습니다. 외부 에이전트는 UPGRADE_DB_API_URL + UPGRADE_DB_API_TOKEN만 사용합니다."
+    if [[ -z "${UPGRADE_DB_API_URL:-}" ]]; then
+      read_input "UPGRADE_DB_API_URL: " UPGRADE_DB_API_URL 0
+      if [[ -z "${UPGRADE_DB_API_URL:-}" ]]; then
+        fail "UPGRADE_DB_API_URL이 비어있습니다."
+      fi
+    fi
+    if [[ -z "${UPGRADE_DB_API_TOKEN:-}" ]]; then
+      read_input "UPGRADE_DB_API_TOKEN: " UPGRADE_DB_API_TOKEN 1
+      if [[ -z "${UPGRADE_DB_API_TOKEN:-}" ]]; then
+        fail "UPGRADE_DB_API_TOKEN이 비어있습니다."
+      fi
+    fi
     TOKENS_CHANGED=1
   fi
   return 0
@@ -141,7 +154,7 @@ persist_exports() {
   info "환경변수를 $rc_file 에 저장..."
   touch "$rc_file"
   local var
-  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN UPGRADE_DB_READ_ONLY_CREDENTIAL; do
+  for var in AGENT_SKILLS_GH_TOKEN UPGRADE_API_TOKEN UPGRADE_DB_API_URL UPGRADE_DB_API_TOKEN UPGRADE_DB_READ_ONLY_CREDENTIAL; do
     if grep -q "^export ${var}=" "$rc_file" 2>/dev/null; then
       sed -i.bak "/^export ${var}=/d" "$rc_file"
       rm -f "$rc_file.bak"
@@ -156,8 +169,11 @@ persist_exports() {
     if [[ -n "${UPGRADE_API_TOKEN:-}" ]]; then
       echo "export UPGRADE_API_TOKEN=\"$UPGRADE_API_TOKEN\""
     fi
-    if [[ -n "${UPGRADE_DB_READ_ONLY_CREDENTIAL:-}" ]]; then
-      echo "export UPGRADE_DB_READ_ONLY_CREDENTIAL=\"$UPGRADE_DB_READ_ONLY_CREDENTIAL\""
+    if [[ -n "${UPGRADE_DB_API_URL:-}" ]]; then
+      echo "export UPGRADE_DB_API_URL=\"$UPGRADE_DB_API_URL\""
+    fi
+    if [[ -n "${UPGRADE_DB_API_TOKEN:-}" ]]; then
+      echo "export UPGRADE_DB_API_TOKEN=\"$UPGRADE_DB_API_TOKEN\""
     fi
   } >> "$rc_file"
 }
@@ -348,8 +364,9 @@ EOF
     echo "    source $rc_file"
     echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
     echo
-    echo "  upgrade-db 실행에는 별도 read-only DB URL이 필요합니다:"
-    echo "    export UPGRADE_DB_DATABASE_URL=\"<read-only db url>\""
+    echo "  upgrade-db 외부 실행은 gateway 토큰만 사용합니다:"
+    echo "    export UPGRADE_DB_API_URL=\"https://<upgrade-db-gateway>\""
+    echo "    export UPGRADE_DB_API_TOKEN=\"<permanent upgrade-db cli token>\""
     echo
     echo "  * 자식 프로세스는 부모 셸의 환경을 바꿀 수 없어 자동 source가 불가능합니다."
   fi
