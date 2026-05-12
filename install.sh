@@ -364,8 +364,8 @@ EOF
     echo "    source $rc_file"
     echo "  (또는 터미널을 새로 여세요. 새 셸은 $rc_file 을 자동 로드합니다.)"
     echo
-    echo "  upgrade-db 외부 실행은 gateway 토큰만 사용합니다:"
-    echo "    export UPGRADE_DB_API_URL=\"https://<upgrade-db-gateway>\""
+    echo "  upgrade-db 외부 실행은 기존 API 서버의 API gateway 토큰만 사용합니다:"
+    echo "    export UPGRADE_DB_API_URL=\"https://<upgrade-api-host>/upgrade-db\""
     echo "    export UPGRADE_DB_API_TOKEN=\"<permanent upgrade-db cli token>\""
     echo
     echo "  * 자식 프로세스는 부모 셸의 환경을 바꿀 수 없어 자동 source가 불가능합니다."

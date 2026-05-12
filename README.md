@@ -42,7 +42,7 @@ curl -sSL .../install.sh | bash -s -- -l
 
 1. **GitHub PAT** — `agent-skills` 레포 read 권한 (classic `repo` 스코프)
 2. **Upgrade API 토큰** — `upgrade-api` 설치나 인터랙티브 전체 설치 시 필요
-3. **Upgrade DB gateway URL/token** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_API_URL`, `UPGRADE_DB_API_TOKEN` 저장
+3. **Upgrade DB API gateway URL/token** — `upgrade-db` 설치나 인터랙티브 전체 설치 시 `UPGRADE_DB_API_URL`, `UPGRADE_DB_API_TOKEN` 저장
 
 `upgrade-db`를 설치하면 스킬 본문 설치와 별도로 CLI도 GitHub Packages에서 설치/업데이트합니다:
 
@@ -52,10 +52,10 @@ npm install -g @team-upgrade/upgrade-db --registry=https://npm.pkg.github.com
 
 한 번 입력하면 rc 파일(`~/.zshrc` 등)에 저장되어 다음 실행부터는 자동으로 쓰입니다. GH 토큰은 재실행마다 GitHub에 검증 호출을 보내며, 여전히 유효하면 재입력 없이 통과합니다. `upgrade-db`만 지정하면 `UPGRADE_API_TOKEN`은 요구하지 않습니다.
 
-`upgrade-db`는 외부 에이전트에 DB URL을 주지 않습니다. 외부 실행 runtime은 gateway URL/token만 사용합니다:
+`upgrade-db`는 외부 에이전트에 DB URL을 주지 않습니다. 외부 실행 runtime은 기존 UpgradeCampus API 서버의 API gateway URL/token만 사용합니다:
 
 ```bash
-export UPGRADE_DB_API_URL="https://<upgrade-db-gateway>"
+export UPGRADE_DB_API_URL="https://<upgrade-api-host>/upgrade-db"
 export UPGRADE_DB_API_TOKEN="<permanent upgrade-db cli token>"
 ```
 

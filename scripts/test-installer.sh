@@ -67,13 +67,13 @@ test_upgrade_db_only_does_not_require_api_token() {
   make_fake_bin "$home"
   {
     printf 'export AGENT_SKILLS_GH_TOKEN="dummy-gh"\n'
-    printf 'export UPGRADE_DB_API_URL="https://upgrade-db.example"\n'
+    printf 'export UPGRADE_DB_API_URL="https://api.upgrade.example/upgrade-db"\n'
     printf 'export UPGRADE_DB_API_TOKEN="dummy-db-token"\n'
   } > "$home/.zshrc"
 
   run_installer "$home" upgrade-db -a codex -a openclaw -y
 
-  assert_contains "$home/.zshrc" 'UPGRADE_DB_API_URL="https://upgrade-db.example"'
+  assert_contains "$home/.zshrc" 'UPGRADE_DB_API_URL="https://api.upgrade.example/upgrade-db"'
   assert_contains "$home/.zshrc" 'UPGRADE_DB_API_TOKEN="dummy-db-token"'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_DATABASE_URL'
   assert_not_contains "$home/.zshrc" 'UPGRADE_DB_READ_ONLY_CREDENTIAL'
